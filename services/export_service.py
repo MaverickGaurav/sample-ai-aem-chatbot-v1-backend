@@ -1,5 +1,6 @@
 """
-Export Service - Handles CSV and PDF export of compliance results
+Export Service V2 - FIXED CSV and PDF export
+Handles export of compliance results with proper encoding and formatting
 """
 import csv
 import os
@@ -13,7 +14,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from models.schemas import ComplianceResult
 from config import Config
 
 
@@ -22,16 +22,12 @@ class ExportService:
         self.upload_folder = Config.UPLOAD_FOLDER
         os.makedirs(self.upload_folder, exist_ok=True)
 
-    def export_to_csv(
-            self,
-            results: List[ComplianceResult],
-            include_details: bool = True
-    ) -> dict:
+    def export_to_csv(self, results: List[dict], include_details: bool = True) -> dict:
         """
-        Export compliance results to CSV
+        Export compliance results to CSV - FIXED VERSION
 
         Args:
-            results: List of compliance results
+            results: List of compliance result dictionaries
             include_details: Include detailed check results
 
         Returns:
@@ -41,84 +37,96 @@ class ExportService:
         filename = f"compliance_report_{timestamp}.csv"
         filepath = os.path.join(self.upload_folder, filename)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+        try:
             if include_details:
                 # Detailed export with all check results
-                fieldnames = [
-                    'Page Path', 'Page Title', 'Overall Score', 'Grade',
-                    'Total Issues', 'High Priority', 'Medium Priority', 'Low Priority',
-                    'Category', 'Category Score', 'Check Name', 'Check Status',
-                    'Check Score', 'Issues', 'Recommendations', 'Severity',
-                    'Checked At'
-                ]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
+                rows = []
 
                 for result in results:
-                    for category in result.categories:
-                        for check in category.checks:
-                            writer.writerow({
-                                'Page Path': result.page_path,
-                                'Page Title': result.page_title,
-                                'Overall Score': result.overall_score,
-                                'Grade': result.grade,
-                                'Total Issues': result.total_issues,
-                                'High Priority': result.high_priority_issues,
-                                'Medium Priority': result.medium_priority_issues,
-                                'Low Priority': result.low_priority_issues,
-                                'Category': category.name,
-                                'Category Score': category.score,
-                                'Check Name': check.name,
-                                'Check Status': 'PASS' if check.passed else 'FAIL',
-                                'Check Score': check.score,
-                                'Issues': '; '.join(check.issues),
-                                'Recommendations': '; '.join(check.recommendations),
-                                'Severity': check.severity.upper(),
-                                'Checked At': result.checked_at.strftime("%Y-%m-%d %H:%M:%S")
+                    page_path = result.get('page_path', '')
+                    page_title = result.get('page_title', '')
+                    overall_score = result.get('overall_score', 0)
+                    grade = result.get('grade', 'F')
+                    total_issues = result.get('total_issues', 0)
+                    high_priority = result.get('high_priority_issues', 0)
+                    medium_priority = result.get('medium_priority_issues', 0)
+                    low_priority = result.get('low_priority_issues', 0)
+                    checked_at = result.get('checked_at', datetime.now().isoformat())
+
+                    categories = result.get('categories', [])
+
+                    for category in categories:
+                        category_name = category.get('name', '')
+                        category_score = category.get('score', 0)
+
+                        checks = category.get('checks', [])
+                        for check in checks:
+                            rows.append({
+                                'Page Path': page_path,
+                                'Page Title': page_title,
+                                'Overall Score': f"{overall_score:.2f}",
+                                'Grade': grade,
+                                'Total Issues': total_issues,
+                                'High Priority': high_priority,
+                                'Medium Priority': medium_priority,
+                                'Low Priority': low_priority,
+                                'Category': category_name,
+                                'Category Score': f"{category_score:.2f}",
+                                'Check Name': check.get('name', ''),
+                                'Check Status': 'PASS' if check.get('passed', False) else 'FAIL',
+                                'Check Score': f"{check.get('score', 0):.2f}",
+                                'Issues': '; '.join(check.get('issues', [])),
+                                'Recommendations': '; '.join(check.get('recommendations', [])),
+                                'Severity': check.get('severity', 'medium').upper(),
+                                'Checked At': checked_at
                             })
+
+                # Write using pandas for better encoding handling
+                df = pd.DataFrame(rows)
+                df.to_csv(filepath, index=False, encoding='utf-8-sig')
+
             else:
                 # Summary export
-                fieldnames = [
-                    'Page Path', 'Page Title', 'Overall Score', 'Grade',
-                    'Total Issues', 'High Priority', 'Medium Priority',
-                    'Low Priority', 'Checked At'
-                ]
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-
+                rows = []
                 for result in results:
-                    writer.writerow({
-                        'Page Path': result.page_path,
-                        'Page Title': result.page_title,
-                        'Overall Score': result.overall_score,
-                        'Grade': result.grade,
-                        'Total Issues': result.total_issues,
-                        'High Priority': result.high_priority_issues,
-                        'Medium Priority': result.medium_priority_issues,
-                        'Low Priority': result.low_priority_issues,
-                        'Checked At': result.checked_at.strftime("%Y-%m-%d %H:%M:%S")
+                    rows.append({
+                        'Page Path': result.get('page_path', ''),
+                        'Page Title': result.get('page_title', ''),
+                        'Overall Score': f"{result.get('overall_score', 0):.2f}",
+                        'Grade': result.get('grade', 'F'),
+                        'Total Issues': result.get('total_issues', 0),
+                        'High Priority': result.get('high_priority_issues', 0),
+                        'Medium Priority': result.get('medium_priority_issues', 0),
+                        'Low Priority': result.get('low_priority_issues', 0),
+                        'Checked At': result.get('checked_at', datetime.now().isoformat())
                     })
 
-        file_size = os.path.getsize(filepath)
+                df = pd.DataFrame(rows)
+                df.to_csv(filepath, index=False, encoding='utf-8-sig')
 
-        return {
-            'success': True,
-            'file_path': filepath,
-            'file_name': filename,
-            'format': 'csv',
-            'size_bytes': file_size
-        }
+            file_size = os.path.getsize(filepath)
 
-    def export_to_pdf(
-            self,
-            results: List[ComplianceResult],
-            include_details: bool = True
-    ) -> dict:
+            return {
+                'success': True,
+                'file_path': filepath,
+                'file_name': filename,
+                'format': 'csv',
+                'size_bytes': file_size
+            }
+
+        except Exception as e:
+            print(f"CSV Export Error: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def export_to_pdf(self, results: List[dict], include_details: bool = True) -> dict:
         """
-        Export compliance results to PDF
+        Export compliance results to PDF - FIXED VERSION
 
         Args:
-            results: List of compliance results
+            results: List of compliance result dictionaries
             include_details: Include detailed check results
 
         Returns:
@@ -128,181 +136,189 @@ class ExportService:
         filename = f"compliance_report_{timestamp}.pdf"
         filepath = os.path.join(self.upload_folder, filename)
 
-        # Create PDF document
-        doc = SimpleDocTemplate(
-            filepath,
-            pagesize=A4,
-            rightMargin=30,
-            leftMargin=30,
-            topMargin=30,
-            bottomMargin=30
-        )
-
-        # Container for PDF elements
-        elements = []
-        styles = getSampleStyleSheet()
-
-        # Custom styles
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1e40af'),
-            spaceAfter=30,
-            alignment=TA_CENTER
-        )
-
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=16,
-            textColor=colors.HexColor('#1e40af'),
-            spaceAfter=12,
-            spaceBefore=12
-        )
-
-        # Title
-        title = Paragraph("AEM Compliance Report", title_style)
-        elements.append(title)
-
-        # Report metadata
-        report_date = Paragraph(
-            f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            styles['Normal']
-        )
-        elements.append(report_date)
-        elements.append(Spacer(1, 0.2 * inch))
-
-        # Summary statistics
-        total_pages = len(results)
-        avg_score = sum(r.overall_score for r in results) / total_pages if total_pages > 0 else 0
-        total_issues = sum(r.total_issues for r in results)
-
-        summary_data = [
-            ['Total Pages Analyzed', str(total_pages)],
-            ['Average Score', f"{avg_score:.2f}"],
-            ['Total Issues Found', str(total_issues)],
-            ['High Priority Issues', str(sum(r.high_priority_issues for r in results))],
-            ['Medium Priority Issues', str(sum(r.medium_priority_issues for r in results))],
-            ['Low Priority Issues', str(sum(r.low_priority_issues for r in results))]
-        ]
-
-        summary_table = Table(summary_data, colWidths=[3 * inch, 2 * inch])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e0e7ff')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-            ('GRID', (0, 0), (-1, -1), 1, colors.grey)
-        ]))
-
-        elements.append(Paragraph("Executive Summary", heading_style))
-        elements.append(summary_table)
-        elements.append(Spacer(1, 0.3 * inch))
-
-        # Individual page results
-        for idx, result in enumerate(results):
-            if idx > 0:
-                elements.append(PageBreak())
-
-            # Page header
-            page_title = Paragraph(
-                f"<b>Page {idx + 1}:</b> {result.page_title}",
-                heading_style
+        try:
+            # Create PDF document
+            doc = SimpleDocTemplate(
+                filepath,
+                pagesize=A4,
+                rightMargin=30,
+                leftMargin=30,
+                topMargin=30,
+                bottomMargin=30
             )
-            elements.append(page_title)
 
-            # Page details
-            page_info = [
-                ['Path', result.page_path],
-                ['Overall Score', f"{result.overall_score:.2f}"],
-                ['Grade', result.grade],
-                ['Total Issues', str(result.total_issues)]
-            ]
+            elements = []
+            styles = getSampleStyleSheet()
 
-            page_table = Table(page_info, colWidths=[1.5 * inch, 4 * inch])
-            page_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f4f6')),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-                ('PADDING', (0, 0), (-1, -1), 6)
-            ]))
-            elements.append(page_table)
+            # Custom styles
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=24,
+                textColor=colors.HexColor('#1e40af'),
+                spaceAfter=30,
+                alignment=TA_CENTER
+            )
+
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontSize=16,
+                textColor=colors.HexColor('#1e40af'),
+                spaceAfter=12,
+                spaceBefore=12
+            )
+
+            # Title
+            title = Paragraph("AEM Compliance Report", title_style)
+            elements.append(title)
+
+            # Report metadata
+            report_date = Paragraph(
+                f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                styles['Normal']
+            )
+            elements.append(report_date)
             elements.append(Spacer(1, 0.2 * inch))
 
-            if include_details:
-                # Category results
-                for category in result.categories:
-                    cat_header = Paragraph(
-                        f"<b>{category.name}</b> - Score: {category.score:.2f}%",
-                        styles['Heading3']
-                    )
-                    elements.append(cat_header)
+            # Summary statistics
+            total_pages = len(results)
+            avg_score = sum(r.get('overall_score', 0) for r in results) / total_pages if total_pages > 0 else 0
+            total_issues = sum(r.get('total_issues', 0) for r in results)
 
-                    # Check results table
-                    check_data = [['Check', 'Status', 'Severity', 'Issues']]
+            summary_data = [
+                ['Metric', 'Value'],
+                ['Total Pages Analyzed', str(total_pages)],
+                ['Average Score', f"{avg_score:.2f}%"],
+                ['Total Issues Found', str(total_issues)],
+                ['High Priority Issues', str(sum(r.get('high_priority_issues', 0) for r in results))],
+                ['Medium Priority Issues', str(sum(r.get('medium_priority_issues', 0) for r in results))],
+                ['Low Priority Issues', str(sum(r.get('low_priority_issues', 0) for r in results))]
+            ]
 
-                    for check in category.checks:
-                        status = '✓ PASS' if check.passed else '✗ FAIL'
-                        issues_text = check.issues[0][:50] + '...' if check.issues and len(check.issues[0]) > 50 else (
-                            check.issues[0] if check.issues else 'None')
+            summary_table = Table(summary_data, colWidths=[3 * inch, 2 * inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e0e7ff')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey)
+            ]))
 
-                        check_data.append([
-                            check.name,
-                            status,
-                            check.severity.upper(),
-                            issues_text
-                        ])
+            elements.append(Paragraph("Executive Summary", heading_style))
+            elements.append(summary_table)
+            elements.append(Spacer(1, 0.3 * inch))
 
-                    check_table = Table(
-                        check_data,
-                        colWidths=[2 * inch, 0.8 * inch, 0.8 * inch, 2 * inch]
-                    )
-                    check_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e0e7ff')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 10),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                        ('PADDING', (0, 0), (-1, -1), 4),
-                        ('VALIGN', (0, 0), (-1, -1), 'TOP')
-                    ]))
-                    elements.append(check_table)
-                    elements.append(Spacer(1, 0.15 * inch))
+            # Individual page results
+            for idx, result in enumerate(results):
+                if idx > 0:
+                    elements.append(PageBreak())
 
-        # Build PDF
-        doc.build(elements)
+                # Page header
+                page_title_text = result.get('page_title', 'Unknown Page')
+                page_title = Paragraph(f"<b>Page {idx + 1}:</b> {page_title_text}", heading_style)
+                elements.append(page_title)
 
-        file_size = os.path.getsize(filepath)
+                # Page details
+                page_info = [
+                    ['Field', 'Value'],
+                    ['Path', result.get('page_path', '')],
+                    ['Overall Score', f"{result.get('overall_score', 0):.2f}%"],
+                    ['Grade', result.get('grade', 'F')],
+                    ['Total Issues', str(result.get('total_issues', 0))]
+                ]
 
-        return {
-            'success': True,
-            'file_path': filepath,
-            'file_name': filename,
-            'format': 'pdf',
-            'size_bytes': file_size
-        }
+                page_table = Table(page_info, colWidths=[1.5 * inch, 4 * inch])
+                page_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+                    ('PADDING', (0, 0), (-1, -1), 6)
+                ]))
+                elements.append(page_table)
+                elements.append(Spacer(1, 0.2 * inch))
 
-    def export_results(
-            self,
-            results: List[ComplianceResult],
-            format: str = 'csv',
-            include_details: bool = True
-    ) -> dict:
+                if include_details:
+                    # Category results
+                    categories = result.get('categories', [])
+                    for category in categories:
+                        cat_header = Paragraph(
+                            f"<b>{category.get('name', 'Unknown Category')}</b> - Score: {category.get('score', 0):.2f}%",
+                            styles['Heading3']
+                        )
+                        elements.append(cat_header)
+
+                        # Check results table
+                        check_data = [['Check', 'Status', 'Severity', 'Issues']]
+
+                        checks = category.get('checks', [])
+                        for check in checks:
+                            status = '✓ PASS' if check.get('passed', False) else '✗ FAIL'
+                            issues = check.get('issues', [])
+                            issues_text = issues[0][:50] + '...' if issues and len(issues[0]) > 50 else (
+                                issues[0] if issues else 'None')
+
+                            check_data.append([
+                                check.get('name', ''),
+                                status,
+                                check.get('severity', 'medium').upper(),
+                                issues_text
+                            ])
+
+                        check_table = Table(check_data, colWidths=[2 * inch, 0.8 * inch, 0.8 * inch, 2 * inch])
+                        check_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e0e7ff')),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), 10),
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                            ('PADDING', (0, 0), (-1, -1), 4),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP')
+                        ]))
+                        elements.append(check_table)
+                        elements.append(Spacer(1, 0.15 * inch))
+
+            # Build PDF
+            doc.build(elements)
+
+            file_size = os.path.getsize(filepath)
+
+            return {
+                'success': True,
+                'file_path': filepath,
+                'file_name': filename,
+                'format': 'pdf',
+                'size_bytes': file_size
+            }
+
+        except Exception as e:
+            print(f"PDF Export Error: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def export_results(self, results: List[dict], format: str = 'csv', include_details: bool = True) -> dict:
         """
         Export results in specified format
 
         Args:
-            results: Compliance results
+            results: Compliance results (as dictionaries)
             format: Export format ('csv' or 'pdf')
             include_details: Include detailed results
 
         Returns:
             Export information
         """
+        if not results:
+            return {
+                'success': False,
+                'error': 'No results to export'
+            }
+
         if format.lower() == 'csv':
             return self.export_to_csv(results, include_details)
         elif format.lower() == 'pdf':

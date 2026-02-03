@@ -1,8 +1,8 @@
 """
-Web Search Service - Handles web search functionality
+Web Search Service V2 - Enhanced with multiple search engines
 """
 import requests
-from typing import List, Dict
+from typing import List, Dict, Optional
 from bs4 import BeautifulSoup
 from services.ollama_service import OllamaService
 from config import Config
@@ -12,8 +12,35 @@ class WebSearchService:
     def __init__(self):
         self.max_results = Config.MAX_SEARCH_RESULTS
         self.ollama_service = OllamaService()
+        self.engines = {
+            'duckduckgo': self._search_duckduckgo,
+            'google': self._search_google,
+            'bing': self._search_bing
+        }
 
-    def search(self, query: str, max_results: int = None) -> Dict:
+    def search(
+            self,
+            query: str,
+            max_results: int = None,
+            engine: str = 'duckduckgo'
+    ) -> Dict:
+        """
+        Search the web using specified engine
+
+        Args:
+            query: Search query
+            max_results: Maximum number of results
+            engine: Search engine to use
+
+        Returns:
+            Dictionary with search results
+        """
+        max_results = max_results or self.max_results
+
+        search_func = self.engines.get(engine, self._search_duckduckgo)
+        return search_func(query, max_results)
+
+    def _search_duckduckgo(self, query: str, max_results: int) -> Dict:
         """
         Search the web using DuckDuckGo HTML
 

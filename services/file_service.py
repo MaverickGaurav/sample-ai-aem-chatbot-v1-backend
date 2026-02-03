@@ -1,5 +1,6 @@
 """
-File Service - Handles file uploads and processing
+File Service V2 - Enhanced with query support
+Handles file uploads with simultaneous question answering
 """
 import os
 from typing import Dict, Optional
@@ -55,16 +56,18 @@ class FileService:
             filepath: str,
             filename: str,
             question: Optional[str] = None,
-            model: str = "gemma:2b"
+            model: str = "gemma:2b",
+            task: str = "analyze"
     ) -> Dict:
         """
-        Process uploaded file and optionally answer questions about it
+        Process uploaded file with optional task
 
         Args:
             filepath: Path to the file
             filename: Original filename
-            question: Optional question about the file
+            question: User's question about the file
             model: Ollama model to use
+            task: Task to perform (analyze, summarize, extract, translate, qa)
 
         Returns:
             Dictionary with extracted content and answer
@@ -99,16 +102,20 @@ class FileService:
                 'character_count': char_count
             }
 
-            # If question is provided, answer it using Ollama
+            # Process based on task
             answer = None
-            if question and content:
-                answer = self._answer_question(content, question, model)
+            preview = content[:500] + "..." if len(content) > 500 else content
+
+            if question or task != "analyze":
+                answer = self._perform_task(content, question, task, model)
 
             return {
                 'success': True,
                 'content': content,
+                'preview': preview,
                 'answer': answer,
-                'metadata': metadata
+                'metadata': metadata,
+                'task': task
             }
 
         except Exception as e:
@@ -117,42 +124,93 @@ class FileService:
                 'error': str(e)
             }
 
-    def _answer_question(
+    def _perform_task(
             self,
             content: str,
-            question: str,
+            question: Optional[str],
+            task: str,
             model: str
     ) -> str:
         """
-        Answer a question about the file content using Ollama
+        Perform specific task on file content
 
         Args:
             content: Extracted file content
             question: User's question
+            task: Task type
             model: Model to use
 
         Returns:
-            Answer to the question
+            Task result
         """
         # Truncate content if too long
         max_content_length = 8000
         if len(content) > max_content_length:
             content = content[:max_content_length] + "\n...[content truncated]"
 
-        system_message = """You are a helpful assistant analyzing document content.
-Answer questions based on the provided document accurately and concisely.
-If the answer cannot be found in the document, say so clearly."""
+        # Task-specific prompts
+        task_prompts = {
+            'summarize': f"""Summarize the following document in a clear, concise manner:
 
-        user_message = f"""Document Content:
+Document:
+{content}
+
+Provide a comprehensive summary highlighting the key points.""",
+
+            'extract': f"""Extract and list the key information from this document:
+
+Document:
+{content}
+
+Extract:
+- Main topics
+- Important facts
+- Key takeaways
+- Action items (if any)""",
+
+            'translate': f"""Translate the following document to English (if not already in English):
+
+Document:
+{content}
+
+Provide an accurate translation.""",
+
+            'qa': f"""Document Content:
 {content}
 
 Question: {question}
 
-Please provide a clear and accurate answer based on the document content."""
+Answer the question based ONLY on the information in the document above. If the answer cannot be found, say so clearly.""",
+
+            'analyze': f"""Analyze this document and provide insights:
+
+Document:
+{content}
+
+Provide:
+1. Document type and purpose
+2. Main themes
+3. Key insights
+4. Potential improvements or issues"""
+        }
+
+        # Use custom question if provided, otherwise use task prompt
+        if question and task == 'qa':
+            prompt = task_prompts['qa']
+        elif task in task_prompts:
+            prompt = task_prompts[task]
+        else:
+            # Default: answer custom question
+            prompt = f"""Document:
+{content}
+
+User Question: {question}
+
+Answer the question based on the document content."""
 
         messages = [
-            {'role': 'system', 'content': system_message},
-            {'role': 'user', 'content': user_message}
+            {'role': 'system', 'content': 'You are a helpful document analysis assistant.'},
+            {'role': 'user', 'content': prompt}
         ]
 
         result = self.ollama_service.chat(messages, model=model, temperature=0.3)
